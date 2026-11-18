@@ -2662,6 +2662,14 @@ async function handleVirtualModelRequest(
     );
   }
 
+  if (source.adapterKey === 'anthropic_messages' &&
+      Object.prototype.hasOwnProperty.call(adapterInput.body, 'safeguards') &&
+      mergedToolingResult.hasInternalTools) {
+    return sendCountedBadRequest(request, reply, config, sourceAdapter.provider,
+      source.adapterKey, targetProviders[0], virtualTargetModel,
+      'Server safeguards require client-owned tool execution. Select the native provider model or a virtual model without internal gateway tools.');
+  }
+
   if (
     virtualModel.profile.execution.mode === 'decorate_only' &&
     mergedToolingResult.hasInternalTools

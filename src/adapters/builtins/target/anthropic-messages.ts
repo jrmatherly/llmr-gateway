@@ -1,3 +1,4 @@
+import { nativeAnthropicFields } from '../anthropic-native-fields';
 import type { StandardRequestInputContent, StandardRequestInputMessage, TargetAdapter } from '../../../types';
 import { err, ok } from '../../../types';
 import { asString, collectStandardInputMessages, isObject } from '../../../utils';
@@ -64,6 +65,7 @@ export const anthropicMessagesTargetAdapter: TargetAdapter = {
       toolContext
     );
     const body: Record<string, unknown> = {
+      ...input.standardRequest[nativeAnthropicFields],
       model: input.standardRequest.model,
       messages: messages.length > 0 ? messages : [{ role: 'user', content: [{ type: 'text', text: '' }] }],
       max_tokens: input.standardRequest.max_output_tokens ?? defaultAnthropicMaxTokens

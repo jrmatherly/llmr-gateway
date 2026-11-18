@@ -1,3 +1,4 @@
+import { nativeAnthropicFields, extraAnthropicFields } from '../adapters/builtins/anthropic-native-fields';
 import { guardStreamTerminalError } from './stream-terminal-error';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -92,6 +93,10 @@ interface PendingGeminiToolCall {
 }
 
 interface AnthropicRelayState {
+  nativeStartFields?: Record<string, unknown>;
+  nativeStartMessageFields?: Record<string, unknown>;
+  nativeResponseFields?: Record<string, unknown>;
+  nativeDelta?: Record<string, unknown>;
   started: boolean;
   finished: boolean;
   messageId: string;
@@ -247,6 +252,7 @@ interface AnthropicStreamThinkingAccumulator {
 }
 
 interface AnthropicNonStreamCollectionState {
+  nativeFields?: Record<string, unknown>;
   id: string;
   model: string;
   outputText: string;
@@ -528,7 +534,9 @@ export async function* relayOptimisticAnthropicMessagesStreamTurn(
     collectAnthropicNonStreamEvent(collectionState, payload, chunk.event);
 
     if (eventType === 'message_start') {
+      relay.state.nativeStartFields = extraAnthropicFields(payload, ['type', 'message']);
       const message = isObject(payload.message) ? payload.message : undefined;
+      relay.state.nativeStartMessageFields = message ? extraAnthropicFields(message, ['id', 'type', 'role', 'model', 'content', 'stop_reason', 'stop_sequence', 'usage']) : undefined;
       const messageId = asString(message?.id);
       if (messageId && !relay.state.started) {
         relay.state.messageId = messageId;
@@ -655,6 +663,7 @@ export async function* relayOptimisticAnthropicMessagesStreamTurn(
     }
 
     if (eventType === 'message_delta') {
+      relay.state.nativeDelta = { ...relay.state.nativeDelta, ...(isObject(payload.delta) ? payload.delta : {}) };
       updateAnthropicRelayUsage(
         relay.state,
         isObject(payload.usage) ? payload.usage : undefined,
@@ -868,6 +877,7 @@ export function finalizeOptimisticOpenAIChatStreamRelay(
     applyStandardUsageToAnthropicRelayState(relay.state, usage);
   }
   if (isNativeAnthropicPayload) {
+    relay.state.nativeResponseFields = extraAnthropicFields(finalPayload, ['id', 'type', 'role', 'model', 'content', 'stop_reason', 'stop_sequence', 'usage']);
     relay.state.preserveNativeStopMetadata = true;
     relay.state.nativeStopReason = asString(finalPayload.stop_reason);
     relay.state.nativeStopSequence = asString(finalPayload.stop_sequence) ?? null;
@@ -1127,6 +1137,14 @@ function collectAnthropicNonStreamEvent(
   sseEvent?: string
 ): void {
   const eventType = asString(payload.type) || sseEvent || '';
+  if (eventType === 'message_start' || eventType === 'message_delta') {
+    const message = isObject(payload.message) ? payload.message : {};
+    const delta = isObject(payload.delta) ? payload.delta : {};
+    state.nativeFields = { ...state.nativeFields,
+      ...extraAnthropicFields(message, ['id', 'type', 'role', 'model', 'content', 'stop_reason', 'stop_sequence', 'usage']),
+      ...extraAnthropicFields(payload, ['type', 'message', 'delta', 'usage']),
+      ...extraAnthropicFields(delta, ['stop_reason', 'stop_sequence']) };
+  }
   if (eventType === 'message_start') {
     const message = isObject(payload.message) ? payload.message : undefined;
     const id = asString(message?.id);
@@ -1272,6 +1290,7 @@ function buildAnthropicNonStreamPayload(
   }
 
   return {
+    ...state.nativeFields,
     id: state.id,
     type: 'message',
     role: 'assistant',
@@ -2196,8 +2215,11 @@ function buildAnthropicMessagesStreamFrames(standardResponse: StandardResponse):
 
   frames.push(
     encodeSseEvent('message_delta', {
+      ...standardResponse[nativeAnthropicFields],
       type: 'message_delta',
       delta: {
+        ...(Object.prototype.hasOwnProperty.call(standardResponse[nativeAnthropicFields] ?? {}, 'safeguard_results')
+          ? { safeguard_results: standardResponse[nativeAnthropicFields]?.safeguard_results } : {}),
         stop_reason: mapFinishReasonToAnthropic(standardResponse.finish_reason),
         stop_sequence: null
       },
@@ -5454,8 +5476,10 @@ function finalizeAnthropicRelay(state: AnthropicRelayState): string[] {
 
   frames.push(
     encodeSseEvent('message_delta', {
+      ...state.nativeResponseFields,
       type: 'message_delta',
       delta: {
+        ...state.nativeDelta,
         stop_reason: state.preserveNativeStopMetadata
           ? state.nativeStopReason || mapFinishReasonToAnthropic(state.finishReason)
           : mapFinishReasonToAnthropic(state.finishReason),
@@ -5490,8 +5514,10 @@ function buildAnthropicMessageStartFrame(state: AnthropicRelayState): string {
   addServerToolUseToAnthropicUsage(usage, state.serverToolUse);
 
   return encodeSseEvent('message_start', {
+    ...state.nativeStartFields,
     type: 'message_start',
     message: {
+      ...state.nativeStartMessageFields,
       id: state.messageId,
       type: 'message',
       role: 'assistant',

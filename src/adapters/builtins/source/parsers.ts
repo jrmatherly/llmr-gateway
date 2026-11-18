@@ -1,3 +1,4 @@
+import { preserveNativeAnthropicFields } from '../anthropic-native-fields';
 import type {
   Result,
   SourceAdapterRequestInput,
@@ -148,6 +149,7 @@ export function parseAnthropicMessagesRequest(body: Record<string, unknown>): Re
   }
 
   return ok({
+    ...preserveNativeAnthropicFields(body, ['model', 'messages', 'system', 'max_tokens', 'temperature', 'top_p', 'stop_sequences', 'stream', 'tools', 'tool_choice', 'thinking', 'output_config', 'reasoning', 'reasoning_split']),
     model: asString(body.model),
     instructions,
     input,

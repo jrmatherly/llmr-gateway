@@ -1,3 +1,4 @@
+import { preserveNativeAnthropicFields } from '../anthropic-native-fields';
 import { randomUUID } from 'node:crypto';
 import type {
   Result,
@@ -376,14 +377,14 @@ export function parseAnthropicToStandardResponse(payload: unknown): Result<Stand
     server_tool_use: normalizeServerToolUse(serverToolUse)
   };
 
-  return ok(createStandardResponse({
+  return ok({ ...createStandardResponse({
     id: asString(payload.id) || `msg_${randomUUID()}`,
     model: asString(payload.model) || 'unknown',
     outputText: text,
     outputItems: buildStandardResponseOutputItems(text, toolCalls, reasoningItems),
     usage,
     finishReason: asString(payload.stop_reason)
-  }));
+  }), ...preserveNativeAnthropicFields(payload, ['id', 'type', 'role', 'model', 'content', 'stop_reason', 'stop_sequence', 'usage']) });
 }
 
 export function parseGeminiToStandardResponse(payload: unknown): Result<StandardResponse> {

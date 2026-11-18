@@ -1,3 +1,4 @@
+import { nativeAnthropicFields } from './adapters/builtins/anthropic-native-fields';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 export type BuiltinProvider = 'openai' | 'anthropic' | 'gemini';
@@ -1076,6 +1077,7 @@ export interface StandardUsage {
 }
 
 export interface StandardResponse {
+  [nativeAnthropicFields]?: Record<string, unknown>;
   id: string;
   object: 'response';
   status: 'completed' | 'incomplete';
@@ -1190,6 +1192,7 @@ export interface GatewayBillingTrace {
 }
 
 export interface StandardRequest {
+  [nativeAnthropicFields]?: Record<string, unknown>;
   model?: string;
   instructions?: string;
   input: string | StandardRequestInputMessage[];

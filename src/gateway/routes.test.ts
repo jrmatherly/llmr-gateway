@@ -47,6 +47,32 @@ describe('gateway routes protocol conversion', () => {
     vi.restoreAllMocks();
   });
 
+  it('rejects server safeguards before any internal virtual tool can execute', async () => {
+    const execute = vi.fn();
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    const config = createConfig([createProviderConfig('native', 'anthropic_messages', ['claude'])], undefined, [{
+      id: 'guarded', key: 'guarded', displayName: 'Guarded', enabled: true,
+      match: { exactAliases: ['guarded'], prefixes: [], suffixes: [] },
+      baseModel: { mode: 'fixed', fixedModel: 'native/claude' },
+      tools: [{ name: 'search_web', visibility: 'internal' }],
+      execution: { mode: 'tool_loop', maxTurns: 2, maxToolCalls: 2, clientToolsPolicy: 'allow', streamMode: 'optimistic' },
+      materialization: { enabled: true, includeInGatewayModels: true }
+    }]);
+    const tools = { listDefinitions: async () => [{ name: 'search_web', description: 'Search', inputSchema: { type: 'object', properties: {} } }],
+      has: async () => true, execute, close: async () => undefined };
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime(config, tools as any));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/messages', payload: {
+        model: 'guarded', max_tokens: 32, messages: [{ role: 'user', content: 'hi' }], safeguards: []
+      } });
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toContain('without internal gateway tools');
+      expect(execute).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
   it('lists gateway models in OpenAI format by default', async () => {
     const config = createConfig(
       [

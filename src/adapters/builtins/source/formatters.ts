@@ -1,3 +1,4 @@
+import { nativeAnthropicFields } from '../anthropic-native-fields';
 import type { StandardResponse, StandardResponseReasoning } from '../../../types';
 import { anthropicToolId } from '../anthropic-tool-id';
 import { anthropicInputTokens } from '../../../shared/usage';
@@ -90,6 +91,7 @@ export function formatAnthropicMessagesResponse(response: StandardResponse): Rec
   }
 
   return {
+    ...response[nativeAnthropicFields],
     id: response.id,
     type: 'message',
     role: 'assistant',
