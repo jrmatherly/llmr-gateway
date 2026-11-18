@@ -3,8 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
+      - llmr
   pull_request:
   workflow_dispatch:
 
@@ -13,29 +12,32 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 20
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
           cache: npm
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci
 
-      - name: Run tests
-        run: npm test
-
       - name: Typecheck
-        run: npm run typecheck
+        run: npm run typecheck && npm run typecheck:all
+
+      - name: Test
+        run: npx vitest run
 
       - name: Build
         run: npm run build
 
       - name: Verify npm package
-        run: npm pack --dry-run
+        run: npm pack --dry-run --ignore-scripts

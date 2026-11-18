@@ -1,5 +1,7 @@
 # Next AI Gateway
 
+> This repository is [LLM Router](https://github.com/jrmatherly/llm-router)'s build of [The-NeXT-AI/ai-gateway](https://github.com/The-NeXT-AI/ai-gateway). Its work is on the `llmr` branch, and `main` mirrors upstream. Each release is a tarball attached to a `v*` tag.
+
 [简体中文](README.zh-CN.md)
 
 A TypeScript + Fastify AI protocol gateway for OpenAI, Anthropic, Gemini, MCP Gateway, and event-driven agent workflows.

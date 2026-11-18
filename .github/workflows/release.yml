@@ -1,64 +1,50 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: npm version to publish, for example 1.2.3 or 1.2.3-beta.1.
-        required: true
-        type: string
-      tag:
-        description: npm dist-tag.
-        required: true
-        default: latest
-        type: choice
-        options:
-          - latest
-          - next
-          - beta
-          - alpha
-      access:
-        description: npm package access.
-        required: true
-        default: public
-        type: choice
-        options:
-          - public
-          - restricted
-      dry_run:
-        description: Validate the release without publishing.
-        required: true
-        default: false
-        type: boolean
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
-
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
           cache: npm
 
-      - name: Install dependencies
+      - name: Check the tag matches the package version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - name: Install
         run: npm ci
 
-      - name: Publish package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Typecheck
+        run: npm run typecheck && npm run typecheck:all
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Build and pack
         run: |
-          args=("${{ inputs.version }}" "--tag" "${{ inputs.tag }}" "--access" "${{ inputs.access }}" "--provenance")
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            args+=("--dry-run")
-          fi
-          npm run release -- "${args[@]}"
+          npm run build
+          npm pack --ignore-scripts
+          sha256sum the-next-ai-ai-gateway-*.tgz > SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" the-next-ai-ai-gateway-*.tgz SHA256SUMS --verify-tag --title "$GITHUB_REF_NAME" --notes "Gateway build for LLM Router. Source: this tag."
