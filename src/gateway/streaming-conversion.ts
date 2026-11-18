@@ -1,3 +1,4 @@
+import { guardStreamTerminalError } from './stream-terminal-error';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { FastifyReply } from 'fastify';
@@ -338,7 +339,13 @@ export function relayConvertedStreamFromUpstreamResponse(
   bindAbortSignalToReadable(stream, abortSignal, () => {
     upstreamResponse.body?.cancel(abortSignal?.reason).catch(() => undefined);
   });
-  return reply.send(stream);
+  // Guard after conversion so the terminal error uses the downstream protocol.
+  // Conversion generators can throw after emitting partial output as well.
+  const guarded = guardStreamTerminalError(new Response(
+    Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+    { headers: { 'content-type': 'text/event-stream' } }
+  ), { adapterKey: source.adapterKey, signal: abortSignal });
+  return reply.send(Readable.fromWeb(guarded.body as ReadableStream<Uint8Array>));
 }
 
 export function canRelayOptimisticOpenAIChatStream(source: GatewaySourceContext): boolean {
