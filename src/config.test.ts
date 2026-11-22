@@ -380,6 +380,22 @@ describe('Gateway config providerPlugins', () => {
     expect(parseGatewayConfigFromRaw({ upstreamTimeoutMs: 5000 }).upstreamTimeoutMs).toBe(0);
   });
 
+  it('parses managementRoutes.enabled from config and env', () => {
+    expect(parseGatewayConfigFromRaw({}).managementRoutes).toEqual({ enabled: true });
+    expect(parseGatewayConfigFromRaw({ managementRoutes: { enabled: false } }).managementRoutes).toEqual({
+      enabled: false
+    });
+
+    process.env.GATEWAY_MANAGEMENT_ROUTES_ENABLED = 'false';
+    try {
+      expect(parseGatewayConfigFromRaw({ managementRoutes: { enabled: true } }).managementRoutes).toEqual({
+        enabled: false
+      });
+    } finally {
+      delete process.env.GATEWAY_MANAGEMENT_ROUTES_ENABLED;
+    }
+  });
+
   it('defaults billing trace request body capture to disabled', () => {
     const config = parseGatewayConfigFromRaw({});
 

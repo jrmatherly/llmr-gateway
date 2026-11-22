@@ -522,6 +522,30 @@ describe('manager config routes', () => {
     }
   });
 
+  it.each([
+    [false, 404],
+    [true, 200]
+  ])('registers the manager routes only when managementRoutes.enabled is not false (%s)', async (enabled, statusCode) => {
+    const setup = prepareTempConfig({});
+    tempDir = setup.tempDir;
+    process.env.GATEWAY_CONFIG_PATH = setup.configPath;
+    delete process.env.MANAGER_API_KEY;
+
+    const app = Fastify({ logger: false });
+    registerManagerRoutes(app, { config: createRuntimeConfig({ managementRoutes: { enabled } }) });
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/manager/config'
+      });
+      expect(response.statusCode).toBe(statusCode);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('requires manager api key when the listener is not bound to loopback', async () => {
     const setup = prepareTempConfig({});
     tempDir = setup.tempDir;

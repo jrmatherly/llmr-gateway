@@ -693,6 +693,7 @@ interface GatewayJsonConfig {
   healthAwareRouting?: unknown;
   providerHealthCheck?: unknown;
   metrics?: unknown;
+  managementRoutes?: unknown;
   logging?: unknown;
   cors?: unknown;
   idempotency?: unknown;
@@ -1062,6 +1063,10 @@ export function parseVirtualModelProfilesFromRaw(raw: unknown): VirtualModelProf
   return parseVirtualModelProfilesConfig(raw);
 }
 
+export function isManagementRoutesEnabled(config: Pick<GatewayConfig, 'managementRoutes'>): boolean {
+  return config.managementRoutes?.enabled !== false;
+}
+
 export function applyGatewayConfigInPlace(target: GatewayConfig, next: GatewayConfig): GatewayConfig {
   syncConfigObject(target as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
   return target;
@@ -1218,6 +1223,13 @@ function buildGatewayConfig(jsonConfig: GatewayJsonConfig): GatewayConfig {
     healthAwareRouting: parseGatewayHealthAwareRoutingConfig(healthAwareRoutingRaw),
     providerHealthCheck: parseProviderHealthCheckSchedulerConfig(jsonConfig.providerHealthCheck),
     metrics: parseGatewayMetricsConfig(jsonConfig.metrics),
+    managementRoutes: {
+      enabled: resolveBoolean(
+        process.env.GATEWAY_MANAGEMENT_ROUTES_ENABLED,
+        isPlainObject(jsonConfig.managementRoutes) ? jsonConfig.managementRoutes.enabled : undefined,
+        true
+      )
+    },
     logging: parseGatewayLoggingConfig(jsonConfig.logging),
     cors: parseGatewayCorsConfig(jsonConfig.cors),
     idempotency: parseGatewayIdempotencyConfig(jsonConfig.idempotency),

@@ -132,6 +132,22 @@ describe('Agent Routes', () => {
       expect(body).toHaveProperty('tools');
       expect(Array.isArray(body.tools)).toBe(true);
     });
+
+    it.each([
+      [false, 404],
+      [true, 200]
+    ])('registers the agent routes only when routesEnabled is not false (%s)', async (routesEnabled, statusCode) => {
+      const app = Fastify({ logger: false });
+      registerAgentRoutes(app, runtime, { routesEnabled });
+      try {
+        const tools = await app.inject({ method: 'GET', url: '/agent/tools' });
+        expect(tools.statusCode).toBe(statusCode);
+        const sessions = await app.inject({ method: 'GET', url: '/agent/sessions' });
+        expect(sessions.statusCode).toBe(statusCode);
+      } finally {
+        await app.close();
+      }
+    });
   });
 
   describe('POST /agent/agents', () => {

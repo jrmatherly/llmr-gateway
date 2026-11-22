@@ -22,6 +22,7 @@ const CORS_ALLOWED_HEADERS =
 const CORS_ALLOWED_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
 
 interface AgentRouteOptions {
+  routesEnabled?: boolean;
   managementEnabled?: boolean;
   agentManagementEnabled?: boolean;
   sessionManagementEnabled?: boolean;
@@ -33,6 +34,9 @@ export function registerAgentRoutes(
   runtime: EventDrivenAgentRuntime,
   options: AgentRouteOptions = {}
 ) {
+  if (options.routesEnabled === false) {
+    return;
+  }
   const defaultManagementEnabled = options.managementEnabled ?? true;
   const agentManagementEnabled =
     options.agentManagementEnabled ?? defaultManagementEnabled;

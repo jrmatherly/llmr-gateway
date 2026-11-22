@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   applyGatewayConfigInPlace,
+  isManagementRoutesEnabled,
   parseGatewayConfigFromRaw,
   resolveGatewayConfigPath
 } from '../config';
@@ -46,6 +47,10 @@ const PROVIDER_MANAGEMENT_DISABLED_MESSAGE =
 const redactedSecretValue = '[REDACTED]';
 
 export function registerManagerRoutes(fastify: FastifyInstance, options: ManagerRouteOptions): void {
+  if (!isManagementRoutesEnabled(options.config)) {
+    return;
+  }
+
   const preHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const authResult = authenticateManagerRequest(request, options.config);
     if (authResult.ok) {

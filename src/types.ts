@@ -559,6 +559,10 @@ export interface GatewayMetricsConfig {
   includeProviderHealth: boolean;
 }
 
+export interface GatewayManagementRoutesConfig {
+  enabled: boolean;
+}
+
 export type GatewayLogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
 
 export interface GatewayLoggingConfig {
@@ -966,6 +970,7 @@ export interface GatewayConfig {
   healthAwareRouting: GatewayHealthAwareRoutingConfig;
   providerHealthCheck: ProviderHealthCheckSchedulerConfig;
   metrics: GatewayMetricsConfig;
+  managementRoutes?: GatewayManagementRoutesConfig;
   logging: GatewayLoggingConfig;
   cors: GatewayCorsConfig;
   idempotency: GatewayIdempotencyConfig;
