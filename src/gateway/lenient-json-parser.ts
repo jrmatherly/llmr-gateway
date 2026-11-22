@@ -300,12 +300,21 @@ function decodeZlibWithLimit(
   });
 }
 
+function resolveZstdEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH };
+  if (process.platform === 'win32') {
+    env.SystemRoot = process.env.SystemRoot;
+  }
+  return env;
+}
+
 function decodeZstdWithCli(
   body: Buffer,
   limit: number
 ): Promise<DecodeBodyResult> {
   return new Promise((resolve) => {
     const child = spawn('zstd', ['-d', '--stdout', '--quiet'], {
+      env: resolveZstdEnv(),
       stdio: ['pipe', 'pipe', 'pipe']
     });
 

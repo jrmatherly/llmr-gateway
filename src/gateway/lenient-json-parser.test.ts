@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
 import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { registerLenientJsonParser } from './lenient-json-parser';
@@ -188,6 +191,58 @@ describe('registerLenientJsonParser', () => {
       });
     } finally {
       await app.close();
+    }
+  });
+
+  (process.platform === 'win32' ? it.skip : it)('runs zstd with only PATH from the environment', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'gateway-zstd-env-'));
+    await writeFile(
+      join(binDir, 'zstd'),
+      [
+        '#!/bin/sh',
+        'cat >/dev/null',
+        "names=$(env | sed -n 's/^\\([A-Za-z_][A-Za-z0-9_]*\\)=.*/\\1/p' | tr '\\n' ' ')",
+        'printf \'{"names":"%s","path":"%s"}\' "$names" "$PATH"',
+        ''
+      ].join('\n'),
+      { mode: 0o755 }
+    );
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}${delimiter}${originalPath ?? ''}`;
+    process.env.GATEWAY_ZSTD_ENV_PROBE = 'from-parent';
+    const app = Fastify({ logger: false });
+    registerLenientJsonParser(app);
+    app.post('/echo', async (request) => {
+      return { body: request.body };
+    });
+
+    await app.ready();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/echo',
+        headers: {
+          'content-type': 'application/json',
+          'content-encoding': 'zstd'
+        },
+        payload: Buffer.from('ignored')
+      });
+
+      expect(response.statusCode).toBe(200);
+      const { body } = JSON.parse(response.body) as { body: { names: string; path: string } };
+      expect(body.path).toBe(process.env.PATH);
+      const names = body.names.trim().split(/\s+/);
+      expect(names).toContain('PATH');
+      expect(names.filter((name) => !['PATH', 'PWD', 'SHLVL', '_'].includes(name))).toEqual([]);
+    } finally {
+      await app.close();
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      delete process.env.GATEWAY_ZSTD_ENV_PROBE;
+      await rm(binDir, { recursive: true, force: true });
     }
   });
 });
