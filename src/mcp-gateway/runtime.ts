@@ -12,6 +12,7 @@ import type {
   ToolCallRequestedPayload
 } from '../agent/types';
 import type { AgentMcpServerConfig, McpGatewayConfig, McpGatewayPrincipalConfig } from '../types';
+import { timingSafeTokenEqual } from '../gateway/auth';
 import { isObject, readBearerToken, readHeader } from '../utils';
 import {
   containsBlockedArgumentKeys,
@@ -197,7 +198,7 @@ export class McpGatewayRuntime {
       };
     }
 
-    const principalFromApiKey = this.options.config.principals.find((item) => item.key === credential);
+    const principalFromApiKey = this.options.config.principals.find((item) => timingSafeTokenEqual(item.key, credential));
     const oauthAccess = principalFromApiKey
       ? undefined
       : bearerToken

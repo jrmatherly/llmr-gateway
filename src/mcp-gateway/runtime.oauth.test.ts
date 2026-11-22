@@ -255,6 +255,17 @@ describe('mcp gateway oauth runtime', () => {
     }
   });
 
+  it('matches a principal only by its exact api key', () => {
+    const runtime = createMcpGatewayRuntime({
+      config: createConfig(),
+      servers: []
+    });
+
+    expect(runtime.authenticateSocket({ 'x-api-key': 'mcp-test-key' }).context?.principal.key).toBe('mcp-test-key');
+    expect(runtime.authenticateSocket({ 'x-api-key': 'mcp-test-keY' }).ok).toBe(false);
+    expect(runtime.authenticateSocket({ 'x-api-key': 'wrong' }).ok).toBe(false);
+  });
+
   it('does not trust x-forwarded-for when resolving internal callers', () => {
     const config = createConfig();
     config.internalCidrs = ['10.0.0.0/8'];

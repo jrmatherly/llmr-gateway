@@ -500,6 +500,15 @@ describe('manager config routes', () => {
       });
       expect(invalid.statusCode).toBe(403);
 
+      const invalidSameLength = await app.inject({
+        method: 'GET',
+        url: '/manager/config',
+        headers: {
+          'x-manager-key': 'manager-secreT'
+        }
+      });
+      expect(invalidSameLength.statusCode).toBe(403);
+
       const allowed = await app.inject({
         method: 'GET',
         url: '/manager/config',

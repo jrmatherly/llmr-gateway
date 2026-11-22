@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { applyGatewayConfigInPlace, parseGatewayConfigFromRaw, parseProvidersFromRaw } from '../config'
 import type { GatewayConfig } from '../types'
+import { timingSafeTokenEqual } from '../gateway/auth'
 import { isObject, readBearerToken, readHeader } from '../utils'
 import { hydrateProvidersFromExternalSource } from './external'
 
@@ -872,7 +873,7 @@ function authenticateWebhookRequest(
     }
   }
 
-  if (suppliedKey !== expectedKey) {
+  if (!timingSafeTokenEqual(suppliedKey, expectedKey)) {
     return {
       ok: false,
       statusCode: 403,

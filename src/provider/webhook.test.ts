@@ -61,4 +61,38 @@ describe('provider webhook config transactions', () => {
       await app.close();
     }
   });
+
+  it('accepts only the configured webhook key', async () => {
+    process.env.PROVIDER_WEBHOOK_API_KEY = 'webhook-secret';
+    const config = parseGatewayConfigFromRaw({
+      providerExternal: {
+        enabled: true,
+        endpoint: 'https://providers.example/config'
+      }
+    });
+    const app = Fastify({ logger: false });
+    registerProviderWebhookRoutes(app, { config, onConfigReload: vi.fn(async () => undefined) });
+    await app.ready();
+
+    const send = (key: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/internal/provider/webhook',
+        headers: {
+          'x-provider-webhook-key': key
+        },
+        payload: {
+          type: 'config.patch',
+          operations: []
+        }
+      });
+
+    try {
+      expect((await send('webhook-secreT')).statusCode).toBe(403);
+      expect((await send('wrong')).statusCode).toBe(403);
+      expect((await send('webhook-secret')).statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
 });

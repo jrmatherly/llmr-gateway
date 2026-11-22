@@ -6,6 +6,7 @@ import {
   parseGatewayConfigFromRaw,
   resolveGatewayConfigPath
 } from '../config';
+import { timingSafeTokenEqual } from '../gateway/auth';
 import { checkProviderHealth } from '../gateway/provider-health-check';
 import {
   collectGatewayRuntimePluginHealth,
@@ -859,7 +860,7 @@ function authenticateManagerRequest(
     };
   }
 
-  if (suppliedKey !== managerApiKey) {
+  if (!timingSafeTokenEqual(suppliedKey, managerApiKey)) {
     return {
       ok: false,
       statusCode: 403,
