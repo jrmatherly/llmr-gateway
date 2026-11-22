@@ -73,6 +73,114 @@ describe('gateway routes protocol conversion', () => {
     } finally { await app.close(); }
   });
 
+  it('writes a raw trace for a virtual model request refused with a counted 400', async () => {
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-counted-'));
+    const config = createConfig([createProviderConfig('native', 'anthropic_messages', ['claude'])], undefined, [{
+      id: 'guarded', key: 'guarded', displayName: 'Guarded', enabled: true,
+      match: { exactAliases: ['guarded'], prefixes: [], suffixes: [] },
+      baseModel: { mode: 'fixed', fixedModel: 'native/claude' },
+      tools: [{ name: 'search_web', visibility: 'internal' }],
+      execution: { mode: 'tool_loop', maxTurns: 2, maxToolCalls: 2, clientToolsPolicy: 'allow', streamMode: 'optimistic' },
+      materialization: { enabled: true, includeInGatewayModels: true }
+    }]);
+    config.rawTrace = { ...config.rawTrace, enabled: true, mode: 'body_full', spoolDir };
+    await initializeRawTraceManager(config.rawTrace);
+    const tools = { listDefinitions: async () => [{ name: 'search_web', description: 'Search', inputSchema: { type: 'object', properties: {} } }],
+      has: async () => true, execute: vi.fn(), close: async () => undefined };
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime(config, tools as any));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/messages', payload: {
+        model: 'guarded', max_tokens: 32, messages: [{ role: 'user', content: 'hi' }], safeguards: []
+      } });
+      expect(response.statusCode).toBe(400);
+      const { bundleDir, manifest } = await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      expect(manifest.parts.map((part) => part.partType)).not.toContain('upstream_request');
+      const responseMetadata = JSON.parse(await readFile(join(bundleDir, 'upstream_response_metadata.json'), 'utf8'));
+      expect(responseMetadata.statusCode).toBe(400);
+      expect(await readFile(join(bundleDir, 'upstream_response.json'), 'utf8')).toContain('without internal gateway tools');
+    } finally {
+      await closeRawTraceManager();
+      await app.close();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a raw trace for a virtual model request whose target model is not configured', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-virtual-'));
+    const config = createConfig([createProviderConfig('native', 'anthropic_messages', ['claude'])], undefined, [{
+      id: 'plain', key: 'plain', displayName: 'Plain', enabled: true,
+      match: { exactAliases: ['plain'], prefixes: [], suffixes: [] },
+      baseModel: { mode: 'fixed', fixedModel: 'native/missing' },
+      tools: [],
+      execution: { mode: 'tool_loop', maxTurns: 2, maxToolCalls: 2, clientToolsPolicy: 'allow', streamMode: 'optimistic' },
+      materialization: { enabled: true, includeInGatewayModels: true }
+    }]);
+    config.rawTrace = { ...config.rawTrace, enabled: true, mode: 'body_full', spoolDir };
+    await initializeRawTraceManager(config.rawTrace);
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime(config));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/messages', payload: {
+        model: 'plain', max_tokens: 32, messages: [{ role: 'user', content: 'hi' }]
+      } });
+      expect(response.statusCode).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.body).toContain('model_resolution');
+      const { bundleDir } = await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      const responseMetadata = JSON.parse(await readFile(join(bundleDir, 'upstream_response_metadata.json'), 'utf8'));
+      expect(responseMetadata.statusCode).toBe(400);
+      expect(await readFile(join(bundleDir, 'upstream_response.json'), 'utf8')).toContain('model_resolution');
+    } finally {
+      await closeRawTraceManager();
+      await app.close();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes one raw trace for a virtual model request whose upstream attempt failed', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'virtual target failed' } }), {
+      status: 500, headers: { 'content-type': 'application/json' }
+    }));
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-virtual-failed-'));
+    const config = createConfig([createProviderConfig('native', 'anthropic_messages', ['claude'])], undefined, [{
+      id: 'plain', key: 'plain', displayName: 'Plain', enabled: true,
+      match: { exactAliases: ['plain'], prefixes: [], suffixes: [] },
+      baseModel: { mode: 'fixed', fixedModel: 'native/claude' },
+      tools: [],
+      execution: { mode: 'tool_loop', maxTurns: 2, maxToolCalls: 2, clientToolsPolicy: 'allow', streamMode: 'optimistic' },
+      materialization: { enabled: true, includeInGatewayModels: true }
+    }]);
+    config.rawTrace = { ...config.rawTrace, enabled: true, mode: 'body_full', spoolDir };
+    await initializeRawTraceManager(config.rawTrace);
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime(config));
+    try {
+      const response = await app.inject({ method: 'POST', url: '/v1/messages', payload: {
+        model: 'plain', max_tokens: 32, messages: [{ role: 'user', content: 'hi' }]
+      } });
+      expect(response.statusCode).toBeGreaterThanOrEqual(500);
+      expect(fetchMock).toHaveBeenCalled();
+      await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      const bundles = await readdir(spoolDir);
+      expect(bundles).toHaveLength(1);
+      const bundleDir = join(spoolDir, bundles[0]);
+      const manifest = JSON.parse(await readFile(join(bundleDir, 'manifest.json'), 'utf8'));
+      expect(manifest.parts.map((part: { partType: string }) => part.partType)).toContain('upstream_request');
+      expect(await readFile(join(bundleDir, 'upstream_response.json'), 'utf8')).toContain('virtual target failed');
+    } finally {
+      await closeRawTraceManager();
+      await app.close();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
   it('lists gateway models in OpenAI format by default', async () => {
     const config = createConfig(
       [
@@ -3532,6 +3640,118 @@ describe('gateway routes protocol conversion', () => {
       const upstreamResponse = await readFile(join(bundleDir, 'upstream_response.json'), 'utf8');
       expect(upstreamResponse).toContain('fallback success');
       expect(upstreamResponse).not.toContain('primary failed');
+    } finally {
+      await closeRawTraceManager();
+      await app.close();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a raw trace for a request refused before any upstream call', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-refused-'));
+    const config = createConfig([createProviderConfig('openai-main', 'openai_responses', ['glm-5'])]);
+    config.rawTrace = {
+      ...config.rawTrace,
+      enabled: true,
+      mode: 'body_full',
+      spoolDir
+    };
+    await initializeRawTraceManager(config.rawTrace);
+
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime());
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/responses',
+        headers: {
+          'content-type': 'application/json',
+          'x-target-provider': 'openai-main'
+        },
+        payload: {
+          model: 'gpt-4.1-mini',
+          input: 'hello'
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      const { bundleDir, manifest } = await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      expect(await readdir(spoolDir)).toHaveLength(1);
+      expect(manifest.parts.map((part) => part.partType)).not.toContain('upstream_request');
+
+      const responseMetadata = JSON.parse(
+        await readFile(join(bundleDir, 'upstream_response_metadata.json'), 'utf8')
+      );
+      expect(responseMetadata.statusCode).toBe(400);
+      const upstreamResponse = await readFile(join(bundleDir, 'upstream_response.json'), 'utf8');
+      expect(upstreamResponse).toContain('model_resolution');
+    } finally {
+      await closeRawTraceManager();
+      await app.close();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes one raw trace for a request whose upstream attempt failed', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'primary failed' } }), {
+          status: 500,
+          headers: {
+            'content-type': 'application/json'
+          }
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock as typeof fetch);
+
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-failed-'));
+    const config = createConfig([createProviderConfig('openai-main', 'openai_chat_completions', ['glm-5'])]);
+    config.rawTrace = {
+      ...config.rawTrace,
+      enabled: true,
+      mode: 'body_full',
+      spoolDir
+    };
+    await initializeRawTraceManager(config.rawTrace);
+
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, createGatewayRuntime());
+    await app.ready();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          'content-type': 'application/json',
+          'x-target-provider': 'openai-main'
+        },
+        payload: {
+          model: 'glm-5',
+          messages: [{ role: 'user', content: 'hello' }]
+        }
+      });
+
+      expect(response.statusCode).toBeGreaterThanOrEqual(500);
+      expect(fetchMock).toHaveBeenCalled();
+
+      await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      const bundles = await readdir(spoolDir);
+      expect(bundles).toHaveLength(1);
+      const bundleDir = join(spoolDir, bundles[0]);
+      const manifest = JSON.parse(await readFile(join(bundleDir, 'manifest.json'), 'utf8'));
+      expect(manifest.parts.map((part: { partType: string }) => part.partType)).toContain('upstream_request');
+      const upstreamResponse = await readFile(join(bundleDir, 'upstream_response.json'), 'utf8');
+      expect(upstreamResponse).toContain('primary failed');
     } finally {
       await closeRawTraceManager();
       await app.close();

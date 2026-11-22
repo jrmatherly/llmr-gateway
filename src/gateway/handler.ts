@@ -2161,7 +2161,10 @@ export async function handleGatewayRequest(
         billingTrace: config.billing.trace,
         responseBody: fallbackFailure.payload,
       }),
-      resolveAttemptRawTraceCapture(lastTraceableAttempt),
+      resolveAttemptRawTraceCapture(lastTraceableAttempt) ?? {
+        upstreamResponseBody: fallbackFailure.payload,
+        upstreamResponseStatus: fallbackFailure.status,
+      },
     );
   }
 
@@ -3440,7 +3443,10 @@ async function handleVirtualModelRequest(
         billingTrace: config.billing.trace,
         responseBody: fallbackFailure.payload,
       }),
-      resolveAttemptRawTraceCapture(lastTraceableAttempt),
+      resolveAttemptRawTraceCapture(lastTraceableAttempt) ?? {
+        upstreamResponseBody: fallbackFailure.payload,
+        upstreamResponseStatus: fallbackFailure.status,
+      },
     );
   }
   return reply.send(fallbackFailure.payload);
@@ -6747,6 +6753,7 @@ function sendCountedBadRequest(
       billingTrace: config.billing.trace,
       responseBody: payload,
     }),
+    { upstreamResponseBody: payload, upstreamResponseStatus: 400 },
   );
   return reply.send(payload);
 }
