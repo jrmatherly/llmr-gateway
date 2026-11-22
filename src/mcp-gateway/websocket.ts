@@ -8,6 +8,7 @@ import {
   handleMcpJsonRpcMethod,
   parseJsonRpcRequest
 } from './jsonrpc';
+import { claimWebSocketUpgradePath } from '../gateway/upgrade-paths';
 import { readHeader } from '../utils';
 import { McpGatewayError, type McpGatewayPrincipalContext, type McpGatewayRuntime } from './runtime';
 
@@ -104,9 +105,11 @@ export function registerMcpGatewayWebSocketRoute(
     });
   });
 
+  const releaseUpgradePath = claimWebSocketUpgradePath(fastify.server, runtime.websocketEndpointPath);
   fastify.server.on('upgrade', onUpgrade);
   fastify.addHook('onClose', async () => {
     fastify.server.off('upgrade', onUpgrade);
+    releaseUpgradePath();
     for (const client of websocketServer.clients) {
       client.terminate();
     }

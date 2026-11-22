@@ -54,6 +54,7 @@ import {
   recordProviderCircuitBreakerResponse
 } from './upstream-circuit-breaker';
 import { acquireProviderConcurrencySlot } from './upstream-concurrency';
+import { isWebSocketUpgradePathClaimed } from './upgrade-paths';
 
 interface GatewaySocketContext {
   headers: IncomingHttpHeaders;
@@ -111,6 +112,9 @@ export function registerGatewayResponsesWebSocketRoute(
   const onUpgrade = (request: IncomingMessage, socket: Socket, head: Buffer): void => {
     const requestUrl = safeParseRequestUrl(request);
     if (!requestUrl || !isResponsesWebSocketPath(requestUrl.pathname)) {
+      if (!requestUrl || !isWebSocketUpgradePathClaimed(fastify.server, requestUrl.pathname)) {
+        rejectUpgrade(socket, 404, 'Not Found');
+      }
       return;
     }
 

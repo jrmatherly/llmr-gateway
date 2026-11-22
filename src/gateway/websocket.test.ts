@@ -13,6 +13,8 @@ import { waitForLoopbackListener } from '../__tests__/listener-readiness';
 import { ProviderPluginRegistry } from '../adapters/registry';
 import type { GatewayConfig } from '../types';
 import type { GatewayPluginOutbox } from '../plugins/events';
+import type { McpGatewayRuntime } from '../mcp-gateway/runtime';
+import { registerMcpGatewayWebSocketRoute } from '../mcp-gateway/websocket';
 import { registerGatewayResponsesWebSocketRoute } from './websocket';
 import { createGatewayRuntime } from './runtime';
 import { resetProviderCircuitBreakerForTests } from './upstream-circuit-breaker';
@@ -907,6 +909,57 @@ describe('gateway responses websocket relay', () => {
     );
     expect(upstream.state.activeConnections).toBe(0);
   });
+
+  it('answers an upgrade to a path no handler owns with 404', async () => {
+    const gateway = Fastify({ logger: false });
+    registerGatewayResponsesWebSocketRoute(gateway, createWsGatewayTestConfig('http://127.0.0.1:9/v1'));
+    await gateway.listen({ host: '127.0.0.1', port: 0 });
+    cleanupTasks.push(async () => {
+      await gateway.close();
+    });
+
+    const gatewayPort = (gateway.server.address() as AddressInfo).port;
+    await waitForLoopbackListener(gatewayPort);
+    const rejection = await waitForWebSocketUpgradeRejection(`ws://127.0.0.1:${gatewayPort}/nope`);
+
+    expect(rejection.statusCode).toBe(404);
+  });
+
+  it.each(['gateway first', 'mcp first'])(
+    'leaves the MCP websocket path to its own handler (%s)',
+    async (order) => {
+      const gateway = Fastify({ logger: false });
+      const mcpRuntime = {
+        enabled: true,
+        websocketEnabled: true,
+        websocketEndpointPath: '/mcp/ws',
+        websocketAllowQueryToken: false,
+        oauthEnabled: false,
+        endpointPath: '/mcp',
+        authenticateSocket: () => ({ ok: false, statusCode: 401, error: 'mcp says no' })
+      } as unknown as McpGatewayRuntime;
+      if (order === 'mcp first') {
+        registerMcpGatewayWebSocketRoute(gateway, mcpRuntime);
+      }
+      registerGatewayResponsesWebSocketRoute(gateway, createWsGatewayTestConfig('http://127.0.0.1:9/v1'));
+      if (order === 'gateway first') {
+        registerMcpGatewayWebSocketRoute(gateway, mcpRuntime);
+      }
+      await gateway.listen({ host: '127.0.0.1', port: 0 });
+      cleanupTasks.push(async () => {
+        await gateway.close();
+      });
+
+      const gatewayPort = (gateway.server.address() as AddressInfo).port;
+      await waitForLoopbackListener(gatewayPort);
+      const mcpRejection = await waitForWebSocketUpgradeRejection(`ws://127.0.0.1:${gatewayPort}/mcp/ws`);
+      expect(mcpRejection.statusCode).toBe(401);
+      expect(mcpRejection.body).toContain('mcp says no');
+
+      const unknownRejection = await waitForWebSocketUpgradeRejection(`ws://127.0.0.1:${gatewayPort}/nope`);
+      expect(unknownRejection.statusCode).toBe(404);
+    }
+  );
 });
 
 async function startHangingTcpServer(): Promise<{
