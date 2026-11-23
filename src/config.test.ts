@@ -498,6 +498,22 @@ describe('Gateway config providerPlugins', () => {
     });
   });
 
+  it('sets clientCredentialPassthrough only for a provider that gives it as true', () => {
+    const config = parseGatewayConfigFromRaw({
+      providers: [
+        { name: 'subscription', type: 'anthropic_messages', models: [], clientCredentialPassthrough: true },
+        { name: 'quoted', type: 'anthropic_messages', models: [], clientCredentialPassthrough: 'true' },
+        { name: 'plain', type: 'anthropic_messages', models: [] }
+      ]
+    });
+
+    expect(config.providers.map((provider) => provider.clientCredentialPassthrough)).toEqual([
+      true,
+      false,
+      false
+    ]);
+  });
+
   it('parses Gemini Interactions provider type aliases', () => {
     const config = parseGatewayConfigFromRaw({
       providers: [

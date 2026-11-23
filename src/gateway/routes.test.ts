@@ -13800,6 +13800,225 @@ export function createGatewayPlugin() {
   });
 });
 
+describe('a provider with clientCredentialPassthrough', () => {
+  afterEach(async () => {
+    resetProviderCircuitBreakerForTests();
+    resetProviderConcurrencyForTests();
+    resetGatewayPrecheckStateForTests();
+    resetGatewaySchedulingStateForTests();
+    await closeRawTraceManager();
+    vi.restoreAllMocks();
+  });
+
+  const subscriptionBaseUrl = 'http://127.0.0.1:1/subscription';
+  const limitBody = { type: 'error', error: { type: 'rate_limit_error', message: 'stub limit' } };
+  const limitHeaders = {
+    'retry-after': '7',
+    'anthropic-ratelimit-unified-status': 'stub',
+    'x-should-retry': 'false'
+  };
+  const toolLoopConfig = {
+    enabled: true,
+    maxTurns: 4,
+    maxToolCalls: 4,
+    requireClientDeclaration: true,
+    unknownToolPolicy: 'return_to_client' as const,
+    allowTools: [],
+    denyTools: []
+  };
+
+  function upstreamError(status = 429): Response {
+    return new Response(JSON.stringify(limitBody), {
+      status,
+      headers: { 'content-type': 'application/json', ...limitHeaders }
+    });
+  }
+
+  function upstreamMessage(content: unknown[]): Response {
+    return new Response(
+      JSON.stringify({
+        id: 'msg_stub',
+        type: 'message',
+        role: 'assistant',
+        model: 'listed',
+        content,
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
+  function createProviders(passthrough: boolean): ProviderConfig[] {
+    const subscription = createProviderConfig('subscription', 'anthropic_messages', ['listed']);
+    subscription.baseurl = subscriptionBaseUrl;
+    subscription.clientCredentialPassthrough = passthrough;
+    const backup = createProviderConfig('backup', 'anthropic_messages', ['listed']);
+    backup.baseurl = 'http://127.0.0.1:1/backup';
+    return [subscription, backup];
+  }
+
+  // Answers the subscription provider from the queue, in order, and counts what reaches each provider.
+  function stubUpstreams(subscriptionResponses: Response[]) {
+    const calls = { subscription: 0, backup: 0, subscriptionBodies: [] as Array<Record<string, unknown>> };
+    vi.stubGlobal('fetch', (async (url: string, init?: RequestInit) => {
+      if (!String(url).startsWith(subscriptionBaseUrl)) {
+        calls.backup += 1;
+        return upstreamMessage([{ type: 'text', text: 'from backup' }]);
+      }
+      calls.subscription += 1;
+      calls.subscriptionBodies.push(JSON.parse(String(init?.body || '{}')));
+      return subscriptionResponses.shift() ?? upstreamError(500);
+    }) as typeof fetch);
+    return calls;
+  }
+
+  async function postMessages(
+    config: GatewayConfig,
+    payload: Record<string, unknown> = {},
+    runtime = createGatewayRuntime(config),
+    headers: Record<string, string> = {}
+  ) {
+    const app = Fastify({ logger: false });
+    registerGatewayRoutes(app, config, runtime);
+    await app.ready();
+    try {
+      return await app.inject({
+        method: 'POST',
+        url: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-target-providers': 'subscription,backup',
+          ...headers
+        },
+        payload: {
+          model: 'listed',
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'hello' }],
+          ...payload
+        }
+      });
+    } finally {
+      await app.close();
+    }
+  }
+
+  function expectRelayedLimit(response: Awaited<ReturnType<typeof postMessages>>): void {
+    expect(response.statusCode).toBe(429);
+    expect(JSON.parse(response.body)).toEqual(limitBody);
+    for (const [name, value] of Object.entries(limitHeaders)) {
+      expect(response.headers[name]).toBe(value);
+    }
+  }
+
+  it.each([false, true])(
+    'relays an upstream 429 with its body and headers (stream: %s)',
+    async (stream) => {
+      const calls = stubUpstreams([upstreamError()]);
+
+      const response = await postMessages(createConfig(createProviders(true)), { stream });
+
+      expectRelayedLimit(response);
+      expect(calls).toMatchObject({ subscription: 1, backup: 0 });
+    }
+  );
+
+  it('writes a raw trace for a relayed upstream 429', async () => {
+    stubUpstreams([upstreamError()]);
+    const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-relay-'));
+    const config = createConfig(createProviders(true));
+    config.rawTrace = { ...config.rawTrace, enabled: true, mode: 'body_full', spoolDir };
+    await initializeRawTraceManager(config.rawTrace);
+
+    try {
+      expectRelayedLimit(await postMessages(config));
+
+      const { bundleDir } = await waitForRawTraceManifest(spoolDir);
+      await closeRawTraceManager();
+      const metadata = JSON.parse(await readFile(join(bundleDir, 'upstream_response_metadata.json'), 'utf8'));
+      expect(metadata.statusCode).toBe(429);
+      expect(JSON.parse(await readFile(join(bundleDir, 'upstream_response.json'), 'utf8'))).toEqual(limitBody);
+    } finally {
+      await closeRawTraceManager();
+      await rm(spoolDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still gets the fallback envelope without the flag', async () => {
+    stubUpstreams([upstreamError()]);
+
+    const response = await postMessages(
+      createConfig(createProviders(false)),
+      {},
+      undefined,
+      { 'x-target-providers': 'subscription' }
+    );
+
+    expect(response.statusCode).toBe(429);
+    const body = JSON.parse(response.body);
+    expect(body.error.message).toBe('All target providers failed.');
+    expect(body.error.attempts[0].details).toEqual(limitBody);
+    expect(response.headers['anthropic-ratelimit-unified-status']).toBeUndefined();
+  });
+
+  it('relays an upstream 429 when the gateway tool loop buffers the response', async () => {
+    const calls = stubUpstreams([upstreamError()]);
+    const config = createConfig(createProviders(true));
+    config.transparentToolExecution = toolLoopConfig;
+
+    expectRelayedLimit(await postMessages(config));
+    expect(calls).toMatchObject({ subscription: 1, backup: 0 });
+  });
+
+  it('relays an upstream 429 that answers the turn after a gateway tool call', async () => {
+    const calls = stubUpstreams([
+      upstreamMessage([{ type: 'tool_use', id: 'toolu_stub', name: 'search_web', input: { query: 'x' } }]),
+      upstreamError()
+    ]);
+    const config = createConfig(createProviders(true));
+    config.transparentToolExecution = toolLoopConfig;
+    const searchTool = {
+      name: 'search_web',
+      description: 'Search',
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } } }
+    };
+    const toolProvider = {
+      listDefinitions: async () => [searchTool],
+      has: async () => true,
+      execute: async () => ({ hits: [] }),
+      close: async () => undefined
+    };
+
+    const response = await postMessages(
+      config,
+      { tools: [{ name: 'search_web', description: 'Search', input_schema: searchTool.inputSchema }] },
+      createGatewayRuntime(config, toolProvider as any)
+    );
+
+    expectRelayedLimit(response);
+    expect(calls).toMatchObject({ subscription: 2, backup: 0 });
+  });
+
+  it('relays an upstream 429 that answers the retry of an empty response', async () => {
+    const calls = stubUpstreams([upstreamMessage([]), upstreamError()]);
+    const config = createConfig(createProviders(true));
+    config.transparentToolExecution = toolLoopConfig;
+
+    expectRelayedLimit(await postMessages(config));
+    expect(calls).toMatchObject({ subscription: 2, backup: 0 });
+  });
+
+  it('relays an upstream 429 for a virtual model', async () => {
+    const calls = stubUpstreams([upstreamError()]);
+    const config = createConfig(createProviders(true), undefined, [
+      createFixedAliasProfile('alias', 'virtual-alias', 'subscription/listed')
+    ]);
+
+    expectRelayedLimit(await postMessages(config, { model: 'virtual-alias' }));
+    expect(calls).toMatchObject({ subscription: 1, backup: 0 });
+  });
+});
+
 function restoreEnvValue(name: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[name];

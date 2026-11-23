@@ -144,6 +144,8 @@ interface ProviderAttemptFailure {
   details?: unknown;
   upstreamRequest?: UpstreamRequest;
   upstreamResponseBody?: unknown;
+  // Set for a clientCredentialPassthrough provider: the client gets this response's status and headers with `details` as the body.
+  relay?: Response;
 }
 
 interface StandardResponseParseRetrySuccess {
@@ -912,6 +914,7 @@ export async function handleGatewayRequest(
           details,
           upstreamRequest,
           upstreamResponseBody: details,
+          relay: targetProviderConfig?.clientCredentialPassthrough ? upstreamResponse : undefined
         };
         attempts.push(attempt);
         publishFailedAttemptEventSafe(
@@ -1873,6 +1876,7 @@ export async function handleGatewayRequest(
         details: upstreamPayload,
         upstreamRequest,
         upstreamResponseBody: upstreamPayload,
+        relay: targetProviderConfig?.clientCredentialPassthrough ? upstreamResponse : undefined
       };
       attempts.push(attempt);
       publishFailedAttemptEventSafe(
@@ -2118,6 +2122,7 @@ export async function handleGatewayRequest(
 
   const fallbackFailure = buildFallbackErrorPayload(targetProviders, attempts);
   reply.code(fallbackFailure.status);
+  const lastAttempt = attempts[attempts.length - 1];
   const lastTraceableAttempt = [...attempts]
     .reverse()
     .find(
@@ -2159,13 +2164,16 @@ export async function handleGatewayRequest(
       failureTarget.providerConfig,
       buildGatewayBillingTraceSnapshot(request, reply, {
         billingTrace: config.billing.trace,
-        responseBody: fallbackFailure.payload,
+        responseBody: lastAttempt?.relay ? lastAttempt.details : fallbackFailure.payload,
       }),
       resolveAttemptRawTraceCapture(lastTraceableAttempt) ?? {
         upstreamResponseBody: fallbackFailure.payload,
         upstreamResponseStatus: fallbackFailure.status,
       },
     );
+  }
+  if (lastAttempt?.relay) {
+    return relayUpstreamResponseWithPayload(reply, lastAttempt.relay, lastAttempt.details);
   }
 
   return reply.send(fallbackFailure.payload);
@@ -2448,7 +2456,8 @@ async function runTransparentToolExecutionLoop(input: {
         status: upstreamResponse.status,
         details: upstreamPayload,
         upstreamRequest,
-        upstreamResponseBody: upstreamPayload
+        upstreamResponseBody: upstreamPayload,
+        relay: input.targetProviderConfig?.clientCredentialPassthrough ? upstreamResponse : undefined
       };
       input.state.attempts.push(attempt);
       publishFailedAttemptEventSafe(
@@ -3112,7 +3121,8 @@ async function handleVirtualModelRequest(
           status: upstreamResponse.status,
           details: upstreamPayload,
           upstreamRequest,
-          upstreamResponseBody: upstreamPayload
+          upstreamResponseBody: upstreamPayload,
+          relay: targetProviderConfig?.clientCredentialPassthrough ? upstreamResponse : undefined
         };
         attempts.push(attempt);
         publishFailedAttemptEventSafe(
@@ -3400,6 +3410,7 @@ async function handleVirtualModelRequest(
 
   const fallbackFailure = buildFallbackErrorPayload(targetProviders, attempts);
   reply.code(fallbackFailure.status);
+  const lastAttempt = attempts[attempts.length - 1];
   const lastTraceableAttempt = [...attempts]
     .reverse()
     .find(
@@ -3441,13 +3452,16 @@ async function handleVirtualModelRequest(
       failureTarget.providerConfig,
       buildGatewayBillingTraceSnapshot(request, reply, {
         billingTrace: config.billing.trace,
-        responseBody: fallbackFailure.payload,
+        responseBody: lastAttempt?.relay ? lastAttempt.details : fallbackFailure.payload,
       }),
       resolveAttemptRawTraceCapture(lastTraceableAttempt) ?? {
         upstreamResponseBody: fallbackFailure.payload,
         upstreamResponseStatus: fallbackFailure.status,
       },
     );
+  }
+  if (lastAttempt?.relay) {
+    return relayUpstreamResponseWithPayload(reply, lastAttempt.relay, lastAttempt.details);
   }
   return reply.send(fallbackFailure.payload);
 }
@@ -6956,7 +6970,8 @@ async function retryEmptyOutputResponseParseFailure(input: {
       status: upstreamResponse.status,
       details: upstreamPayload,
       upstreamRequest,
-      upstreamResponseBody: upstreamPayload
+      upstreamResponseBody: upstreamPayload,
+      relay: input.targetProviderConfig?.clientCredentialPassthrough ? upstreamResponse : undefined
     };
     input.attempts.push(attempt);
     publishFailedAttemptEventSafe(
@@ -7063,7 +7078,7 @@ function shouldTryNextTargetAfterFailure(
   attempt: ProviderAttemptFailure | undefined
 ): boolean {
   const nextTarget = targets[currentIndex + 1];
-  if (!nextTarget) {
+  if (!nextTarget || attempt?.relay) {
     return false;
   }
 

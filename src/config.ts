@@ -192,6 +192,7 @@ interface ProviderJsonConfig {
   health?: unknown;
   cache?: unknown;
   credentials?: unknown;
+  clientCredentialPassthrough?: unknown;
   status?: unknown;
   available?: unknown;
   priority?: unknown;
@@ -4318,7 +4319,8 @@ function parseProvidersConfig(value: unknown): ProviderConfig[] {
       billing: parseModelScopedBilling(item.billing, models),
       health: parseProviderHealthConfig(item),
       cache: parseProviderCacheConfig(item.cache),
-      credentials: parseProviderCredentialsConfig(item.credentials)
+      credentials: parseProviderCredentialsConfig(item.credentials),
+      clientCredentialPassthrough: item.clientCredentialPassthrough === true
     };
 
     parsed.push(providerConfig);

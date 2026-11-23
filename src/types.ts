@@ -135,6 +135,8 @@ export interface ProviderConfig {
   credentialId?: string;
   credentialLimits?: ProviderCredentialLimitConfig;
   credentialSourceProviderName?: string;
+  /** The client's own credential reaches this provider, so its error responses go back to the client as they are. */
+  clientCredentialPassthrough?: boolean;
 }
 
 export interface GatewayPluginRouteContext {
