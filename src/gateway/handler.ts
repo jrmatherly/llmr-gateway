@@ -6368,7 +6368,12 @@ function validateModelForTarget(
   config: GatewayConfig
 ): { ok: true; value: string | undefined } | { ok: false; error: string } {
   const providerConfig = resolveProviderConfig(config, target);
-  if (!model || !providerConfig || providerConfig.models.length === 0) {
+  if (
+    !model ||
+    !providerConfig ||
+    providerConfig.models.length === 0 ||
+    providerConfig.clientCredentialPassthrough
+  ) {
     return { ok: true, value: model };
   }
 

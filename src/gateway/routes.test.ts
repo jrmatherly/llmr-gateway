@@ -13933,6 +13933,37 @@ describe('a provider with clientCredentialPassthrough', () => {
     expect(calls).toMatchObject({ subscription: 1, backup: 0 });
   });
 
+  it.each([false, true])(
+    'accepts a model id that is not in its list (stream: %s)',
+    async (stream) => {
+      const calls = stubUpstreams([upstreamMessage([{ type: 'text', text: 'ok' }])]);
+
+      const response = await postMessages(
+        createConfig(createProviders(true)),
+        { model: 'unlisted-9', stream },
+        undefined,
+        { 'x-target-providers': 'subscription' }
+      );
+
+      expect(response.statusCode).toBe(200);
+      expect(calls.subscriptionBodies.map((body) => body.model)).toEqual(['unlisted-9']);
+    }
+  );
+
+  it('refuses a model id that is not in the list of a provider without the flag', async () => {
+    const calls = stubUpstreams([]);
+
+    const response = await postMessages(
+      createConfig(createProviders(false)),
+      { model: 'unlisted-9' },
+      undefined,
+      { 'x-target-providers': 'subscription' }
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(calls.subscription).toBe(0);
+  });
+
   it('writes a raw trace for a relayed upstream 429', async () => {
     stubUpstreams([upstreamError()]);
     const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-relay-'));
