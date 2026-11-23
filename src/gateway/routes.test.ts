@@ -13811,7 +13811,10 @@ describe('raw trace request metadata', () => {
     'x-api-key': 'secret-2',
     'x-llmr-caller-authorization': 'Bearer secret-3',
     'x-llmr-core-auth': 'secret-4',
-    'ocp-apim-subscription-key': 'secret-5'
+    'ocp-apim-subscription-key': 'secret-5',
+    apikey: 'secret-6',
+    'x-hub-signature': 'secret-7',
+    'x-session-jwt': 'secret-8'
   };
   const plainHeaders = {
     'user-agent': 'stub-agent/1.0',
@@ -13843,6 +13846,9 @@ describe('raw trace request metadata', () => {
         'x-llmr-caller-authorization': credentialHeaders['x-llmr-caller-authorization'],
         'x-llmr-core-auth': credentialHeaders['x-llmr-core-auth'],
         'ocp-apim-subscription-key': credentialHeaders['ocp-apim-subscription-key'],
+        apikey: credentialHeaders.apikey,
+        'x-hub-signature': credentialHeaders['x-hub-signature'],
+        'x-session-jwt': credentialHeaders['x-session-jwt'],
         'x-auth-sub': plainHeaders['x-auth-sub'],
         'x-llmr-route-attempt': plainHeaders['x-llmr-route-attempt']
       };

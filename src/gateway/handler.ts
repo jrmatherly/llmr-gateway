@@ -9420,7 +9420,7 @@ function normalizeHeadersForRawTrace(
 
 // No bare `auth` segment: readers of the trace need x-auth-sub as it was sent.
 const credentialHeaderNamePattern =
-  /(?:^|[-_.])(authorization|cookie|credential|key|pass(?:word|wd)?|secret|token)(?:$|[-_.])/i;
+  /(?:^|[-_.])(authorization|bearer|cookie|credential|csrf|jwt|(?:api)?key|pass(?:word|wd)?|secret|signature|token)(?:$|[-_.])/i;
 
 function maskCredentialHeadersForRawTrace(
   headers: Record<string, string> | undefined,
