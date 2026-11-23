@@ -13923,6 +13923,16 @@ describe('a provider with clientCredentialPassthrough', () => {
     }
   );
 
+  it('relays an upstream 401 after one upstream call', async () => {
+    const calls = stubUpstreams([upstreamError(401), upstreamError(401)]);
+
+    const response = await postMessages(createConfig(createProviders(true)));
+
+    expect(response.statusCode).toBe(401);
+    expect(JSON.parse(response.body)).toEqual(limitBody);
+    expect(calls).toMatchObject({ subscription: 1, backup: 0 });
+  });
+
   it('writes a raw trace for a relayed upstream 429', async () => {
     stubUpstreams([upstreamError()]);
     const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-relay-'));

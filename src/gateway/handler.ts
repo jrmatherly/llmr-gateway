@@ -7999,7 +7999,11 @@ async function dispatchUpstreamRequest(
     };
   }
 
-  if (initialUpstreamResponse.value.status !== 401) {
+  // A passthrough provider's credential is the client's, so a second call would send the rejected one again.
+  if (
+    initialUpstreamResponse.value.status !== 401 ||
+    context.targetProviderConfig?.clientCredentialPassthrough
+  ) {
     return {
       ok: true,
       upstreamRequest: initialUpstreamRequest,
