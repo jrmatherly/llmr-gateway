@@ -13800,6 +13800,97 @@ export function createGatewayPlugin() {
   });
 });
 
+describe('raw trace request metadata', () => {
+  afterEach(async () => {
+    await closeRawTraceManager();
+    vi.restoreAllMocks();
+  });
+
+  const credentialHeaders = {
+    authorization: 'Bearer secret-1',
+    'x-api-key': 'secret-2',
+    'x-llmr-caller-authorization': 'Bearer secret-3',
+    'x-llmr-core-auth': 'secret-4',
+    'ocp-apim-subscription-key': 'secret-5'
+  };
+  const plainHeaders = {
+    'user-agent': 'stub-agent/1.0',
+    'x-auth-sub': 'key-id',
+    'x-llmr-route-attempt': '2'
+  };
+
+  it.each(['wire_raw', 'body_full', 'body_redacted'] as const)(
+    'masks credential header values in %s mode',
+    async (mode) => {
+      vi.stubGlobal('fetch', (async () =>
+        new Response(
+          JSON.stringify({
+            id: 'msg_stub',
+            type: 'message',
+            role: 'assistant',
+            model: 'listed',
+            content: [{ type: 'text', text: 'ok' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 1, output_tokens: 1 }
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as typeof fetch);
+      const spoolDir = await mkdtemp(join(tmpdir(), 'gateway-raw-trace-mask-'));
+      const provider = createProviderConfig('subscription', 'anthropic_messages', ['listed']);
+      provider.baseurl = 'http://127.0.0.1:1/subscription';
+      // The adapter sends its own authorization, x-api-key and user-agent. The rest reach the upstream request here.
+      provider.extraHeaders.default = {
+        'x-llmr-caller-authorization': credentialHeaders['x-llmr-caller-authorization'],
+        'x-llmr-core-auth': credentialHeaders['x-llmr-core-auth'],
+        'ocp-apim-subscription-key': credentialHeaders['ocp-apim-subscription-key'],
+        'x-auth-sub': plainHeaders['x-auth-sub'],
+        'x-llmr-route-attempt': plainHeaders['x-llmr-route-attempt']
+      };
+      const config = createConfig([provider]);
+      config.rawTrace = { ...config.rawTrace, enabled: true, mode, spoolDir };
+      await initializeRawTraceManager(config.rawTrace);
+      const app = Fastify({ logger: false });
+      registerGatewayRoutes(app, config, createGatewayRuntime(config));
+      await app.ready();
+
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/v1/messages',
+          headers: {
+            'content-type': 'application/json',
+            'x-target-provider': 'subscription',
+            ...credentialHeaders,
+            ...plainHeaders
+          },
+          payload: { model: 'listed', max_tokens: 16, messages: [{ role: 'user', content: 'hello' }] }
+        });
+        expect(response.statusCode).toBe(200);
+
+        const { bundleDir } = await waitForRawTraceManifest(spoolDir);
+        await closeRawTraceManager();
+        for (const part of ['client_request_metadata', 'upstream_request_metadata']) {
+          const text = await readFile(join(bundleDir, `${part}.json`), 'utf8');
+          // A boolean, so a failure prints no header value.
+          expect(text.includes('secret-'), `${part} holds a credential value`).toBe(false);
+          const headers = JSON.parse(text).headers as Record<string, string>;
+          // body_redacted mode then runs the log sanitizer, which writes its own marker over the names it knows.
+          const markers = mode === 'body_redacted' ? ['[redacted]', '***'] : ['[redacted]'];
+          expect(
+            Object.keys(credentialHeaders).filter((name) => !markers.includes(headers[name])),
+            `${part} credential headers not masked`
+          ).toEqual([]);
+          expect(headers).toMatchObject(plainHeaders);
+        }
+      } finally {
+        await closeRawTraceManager();
+        await app.close();
+        await rm(spoolDir, { recursive: true, force: true });
+      }
+    }
+  );
+});
+
 describe('a provider with clientCredentialPassthrough', () => {
   afterEach(async () => {
     resetProviderCircuitBreakerForTests();

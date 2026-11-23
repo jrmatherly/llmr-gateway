@@ -9418,6 +9418,26 @@ function normalizeHeadersForRawTrace(
   return normalized;
 }
 
+// No bare `auth` segment: readers of the trace need x-auth-sub as it was sent.
+const credentialHeaderNamePattern =
+  /(?:^|[-_.])(authorization|cookie|credential|key|pass(?:word|wd)?|secret|token)(?:$|[-_.])/i;
+
+function maskCredentialHeadersForRawTrace(
+  headers: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  return (
+    headers &&
+    Object.fromEntries(
+      Object.entries(headers).map(([name, value]) => [
+        name,
+        name.toLowerCase() === 'x-llmr-core-auth' || credentialHeaderNamePattern.test(name)
+          ? '[redacted]'
+          : value,
+      ]),
+    )
+  );
+}
+
 function publishRawTraceCaptureSafe(
   request: FastifyRequest,
   config: GatewayConfig,
@@ -9451,7 +9471,9 @@ function publishRawTraceCaptureSafe(
       content: resolveRawTraceContent(config.rawTrace.mode, {
         method: request.method,
         url: traceUrl,
-        headers: normalizeHeadersForRawTrace(request.headers as Record<string, unknown>),
+        headers: maskCredentialHeadersForRawTrace(
+          normalizeHeadersForRawTrace(request.headers as Record<string, unknown>),
+        ),
       }),
       contentType: 'application/json; charset=utf-8',
       redactionPolicy,
@@ -9470,7 +9492,7 @@ function publishRawTraceCaptureSafe(
       content: resolveRawTraceContent(config.rawTrace.mode, {
         method: 'POST',
         url: upstreamTraceUrl,
-        headers: rawTraceCapture.upstreamRequest?.headers,
+        headers: maskCredentialHeadersForRawTrace(rawTraceCapture.upstreamRequest?.headers),
       }),
       contentType: 'application/json; charset=utf-8',
       redactionPolicy,
