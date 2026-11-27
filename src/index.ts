@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
 import {
   closeAgentEventPublisher,
   createAgentRuntime,
@@ -70,7 +70,7 @@ const metricsRequestStarts = new WeakMap<object, bigint>();
 
 const fastify = Fastify({
   logger: resolveFastifyLogger(config.logging),
-  disableRequestLogging: !config.logging.accessLog,
+  logController: new LogController({ disableRequestLogging: !config.logging.accessLog }),
   genReqId: () => randomUUID(),
   bodyLimit: config.bodyLimitBytes
 });

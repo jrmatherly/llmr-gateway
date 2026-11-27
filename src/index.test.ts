@@ -37,7 +37,7 @@ function stopChild(child: ChildProcess): Promise<void> {
 }
 
 describe('gateway entry', () => {
-  it('serves no /manager or /agent route when GATEWAY_MANAGEMENT_ROUTES_ENABLED is false', async () => {
+  it('starts without a Fastify deprecation warning and serves no /manager or /agent route when GATEWAY_MANAGEMENT_ROUTES_ENABLED is false', async () => {
     const workDir = await mkdtemp(join(tmpdir(), 'gateway-entry-'));
     const entryFile = join(workDir, 'index.js');
     const configPath = join(workDir, 'gateway.config.json');
@@ -81,6 +81,7 @@ describe('gateway entry', () => {
       expect(await statusOf('/health')).toBe(200);
       expect(await statusOf('/manager/config')).toBe(404);
       expect(await statusOf('/agent/tools')).toBe(404);
+      expect(output).not.toMatch(/FSTDEP|FastifyDeprecation/);
     } finally {
       await stopChild(child);
       await rm(workDir, { recursive: true, force: true });
